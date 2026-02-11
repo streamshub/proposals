@@ -1,0 +1,17 @@
+name: Validate Proposals
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Validate Proposals
+        uses: jbangdev/jbang-action@v0.136.0
+        with: 
+          script: .github/scripts/ValidateProposals.java
