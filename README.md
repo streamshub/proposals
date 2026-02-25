@@ -8,7 +8,8 @@ Governance rules around the review and acceptance of proposals are defined in th
 
 A template for new proposals can be found [here](./000-template.md).
 
-| #   | Title                                                                           |
-|:--: |:--------------------------------------------------------------------------------|
-| 000 | [StreamsHub Proposal Template](./000-template.md)                               |
+| #   | Title                                                                              |
+|:--: |:-----------------------------------------------------------------------------------|
+| 000 | [StreamsHub Proposal Template](./000-template.md)                                  |
+| 001 | [StreamsHub Quick-start Kustomize Repository](./001-quickstart-kustomize-repo.md)  |
 
