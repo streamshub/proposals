@@ -15,4 +15,5 @@ File name format and numbering is validated by the CI workflow defined in [valid
 | 000 | [StreamsHub Proposal Template](./000-template.md)                                 |
 | 001 | [StreamsHub Quick-start Kustomize Repository](./001-quickstart-kustomize-repo.md) |
 | 002 | [StreamsHub MCP: Strimzi MCP proposal](./002-streamshub-mcp-strimzi.md)           |
+| 003 | [StreamsHub Console Helm](./001-streamshub-console-helm.md)                       |
 
