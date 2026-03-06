@@ -4,14 +4,24 @@ The aim of the StreamsHub organization is to support developers in creating even
 There a several complimentary open-source technologies that are often used together to provide the infrastructure for these architectures.
 This "event stack" consists of:
 
-- Strimzi Kafka Operator and related components (Kafka Bridge, Kafka OAuth, etc.)
+- Strimzi Kafka Operator and related components (Kafka Clusters, Kafka Connect, Kafka Bridge, etc.)
 - Apicurio Schema Registry
 - StreamsHub Web Console
 - Kroxylicious Kafka Proxy
 
-This proposal recommends creating a centralized [Kustomize](https://kustomize.io/)-based repository within the StreamsHub GitHub organization that provides a unified quick-start experience for deploying the event-streaming stack on a local Kubernetes cluster. 
+As laid out in the [current situation](#current-situation) section below, the process for installing all these components is disjointed and complex.
+If a developer wants to quickly assess weather this stack is appropriate for them or to test any one of the compontents as part of a wider stack they have to jump through several different hoops and customizations. 
+What is needed is a single, opinionated installation method which deploys a minimum viable event stack. 
+
+This proposal recommends creating a centralized [Kustomize](https://kustomize.io/)-based repository within the StreamsHub GitHub organization that provides a unified quick-start experience for deploying the event-streaming stack on a local ephemeral (minikube, KIND, etc) or development Kubernetes cluster. 
 The repository would allow developers to install the full stack; including Strimzi, Kafka, Apicurio Registry and StreamsHub Console, using only `kubectl`, with no additional tooling required.
 Installation follows a two-phase approach: first deploying operators and CRDs, then deploying operands, each with a single `kubectl apply -k` command pointing at the GitHub-hosted Kustomize configurations.
+
+It should be noted that this proposal is **not** about recommending a production deployment method. 
+It is not about providing a mechanism to cover all possible deployment configurations, upgrade paths or security setups. 
+This proposal is about providing the lowest resistance way to deploy a minimum viable event-streaming infrastructure stack. 
+However, in future, we may provide a more comprehensive stack deployment method using one of the approaches discussed in the [rejected alternatives](#rejected-alternatives) section. 
+This would, of course, be covered by a separate proposal.
 
 ## Current situation
 
