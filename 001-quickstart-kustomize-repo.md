@@ -58,6 +58,8 @@ The bootstrap server address must match the deployed Kafka cluster name, if you 
 kubectl create -f https://github.com/strimzi/strimzi-kafka-operator/raw/refs/heads/main/examples/bridge/kafka-bridge.yaml -n kafka
 ```
 
+You will then need to figure out the appropriate way to expose the bridge endpoint via Ingress or Route resources in you Kubernetes Cluster.
+
 ### Strimzi Kafka OAuth
 
 Strimzi Kafka OAuth has many possible configurations and its own extensive example folders covering [container](https://github.com/strimzi/strimzi-kafka-oauth/tree/main/examples/docker) and [Kubernetes-based](https://github.com/strimzi/strimzi-kafka-oauth/tree/main/examples/kubernetes) deployments. 
@@ -127,7 +129,7 @@ The quick-start repository should be organized into two main layers:
 
 - Base configs (`base/`): Contains the operator deployments and CRD definitions for each component. These are the resources that must be installed first.
 - Stack configs (`stack/`): Contains the operand custom resources (Kafka cluster, Registry instance, Console CR, etc.) that depend on the operators being ready.
-- Overlays (`overlays/`): Optional variant configurations (e.g. OAuth-enabled Kafka, multi-node clusters) that patch the base or stack layers for different scenarios.
+- Overlays (`overlays/`): Optional variant configurations (e.g. OAuth-enabled Kafka, multi-node clusters with Cruise Control enabled) that patch the base or stack layers for different scenarios.
 
 Each layer has its own `kustomization.yaml` that references the component resources it includes. 
 The stack layer uses remote references to pull in base configurations from the same repository.
