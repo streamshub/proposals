@@ -184,15 +184,21 @@ Three risks in particular must be addressed:
 
 #### Resource labeling
 
-All resources deployed by the quick-start should carry a common label via Kustomize `commonLabels`, for example:
+All resources deployed by the quick-start should carry a common label via the Kustomize `labels` transformer, for example:
 
 ```yaml
-commonLabels:
-  app.kubernetes.io/part-of: streamshub-quickstart
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: streamshub-quickstart
+    includeSelectors: false
 ```
 
-Note that `kubectl delete -k` already targets resources precisely, as it renders the kustomization's manifests and deletes by group/version/kind, namespace and name. 
-Therefore, it will only remove the specific resources defined in the overlay, not all custom resources of a given type. 
+The `labels` transformer is used instead of `commonLabels` because `commonLabels` patches labels into `spec.selector.matchLabels` on Deployments and StatefulSets.
+These selector fields are immutable after creation in Kubernetes, so if a user later runs `kubectl apply -k` again to update the stack, `commonLabels` could cause "field is immutable" errors.
+Using `includeSelectors: false` applies the label only to `metadata.labels`, which avoids this problem while still supporting all the label-based queries needed for teardown and orphan discovery.
+
+Note that `kubectl delete -k` already targets resources precisely, as it renders the kustomization's manifests and deletes by group/version/kind, namespace and name.
+Therefore, it will only remove the specific resources defined in the overlay, not all custom resources of a given type.
 Labels are not needed for basic delete via kustomization to work correctly.
 
 However, labels help with several key issues: 
@@ -317,7 +323,7 @@ A _vanity URL_ (e.g. `streamshub.io/install/dev`) could be a future enhancement 
 - Additive overlays: Kustomize overlays allow new components and configurations to be added without breaking existing installations. Users of the base stack are not affected by the addition of new overlays.
 - Version pinning: The `?ref=` parameter in `kubectl apply -k` URLs allows users to pin to a specific tag or commit. This means users can lock to a known-good version while the repository continues to evolve.
 - Component version coupling: The stack will bundle specific versions of each component together. These version combinations will need compatibility testing across releases. A compatibility matrix should be maintained in the repository documentation.
-- Minimum kubectl version: Kustomize support in `kubectl` requires version 1.14 or later. This is a very low bar given current Kubernetes version support policies, but should be documented.
+- Minimum kubectl version: The `labels` transformer with `includeSelectors` support requires Kustomize v5.0, which is bundled with `kubectl` v1.27 or later. Since v1.27 was released in April 2023 and all currently supported Kubernetes versions include it, this is still a low bar but should be documented.
 
 ## Rejected alternatives
 
