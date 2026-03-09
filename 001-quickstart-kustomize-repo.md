@@ -1,7 +1,7 @@
 # StreamsHub Quick-Start Kustomize Repository
 
 The aim of the StreamsHub organization is to support developers in creating event driven architectures. 
-There a several complimentary open-source technologies that are often used together to provide the infrastructure for these architectures.
+There are several complementary open-source technologies that are often used together to provide the infrastructure for these architectures.
 This "event stack" consists of:
 
 - Strimzi Kafka Operator and related components (Kafka Clusters, Kafka Connect, Kafka Bridge, etc.)
@@ -10,7 +10,7 @@ This "event stack" consists of:
 - Kroxylicious Kafka Proxy
 
 As laid out in the [current situation](#current-situation) section below, the process for installing all these components is disjointed and complex.
-If a developer wants to quickly assess weather this stack is appropriate for them or to test any one of the compontents as part of a wider stack they have to jump through several different hoops and customizations. 
+If a developer wants to quickly assess whether this stack is appropriate for them or to test any one of the components as part of a wider stack they have to jump through several different hoops and customizations. 
 What is needed is a single, opinionated installation method which deploys a minimum viable event stack. 
 
 This proposal recommends creating a centralized [Kustomize](https://kustomize.io/)-based repository within the StreamsHub GitHub organization that provides a unified quick-start experience for deploying the event-streaming stack on a local ephemeral (minikube, KIND, etc) or development Kubernetes cluster. 
@@ -58,7 +58,7 @@ The bootstrap server address must match the deployed Kafka cluster name, if you 
 kubectl create -f https://github.com/strimzi/strimzi-kafka-operator/raw/refs/heads/main/examples/bridge/kafka-bridge.yaml -n kafka
 ```
 
-You will then need to figure out the appropriate way to expose the bridge endpoint via Ingress or Route resources in you Kubernetes Cluster.
+You will then need to figure out the appropriate way to expose the bridge endpoint via Ingress or Route resources in your Kubernetes Cluster.
 
 ### Strimzi Kafka OAuth
 
@@ -115,7 +115,13 @@ Kustomize is commonly used in GitOps workflows, where platform teams define bles
 Critically, `kubectl` can install Kustomize layers hosted remotely on GitHub, GitLab or Bitbucket, provided the Kustomize configuration files are in a repository on one of those domains. 
 Since all StreamsHub components are hosted on GitHub, we can provide Kustomize-based development configurations that are installable directly via `kubectl` with no additional tooling.
 
-This proposal recommends creating a centralized Kustomize-based repository within the StreamsHub GitHub organization that provides a unified quick-start experience for deploying the event-streaming stack on a local Kubernetes cluster. 
+This proposal recommends creating a centralized Kustomize-based repository within the StreamsHub GitHub organization that provides a unified developer quick-start experience for deploying the event-streaming stack on a local ephemeral or remote development Kubernetes cluster. 
+
+It should be noted that this proposal is **not** about recommending a production deployment method. 
+It is not about providing a mechanism to cover all possible deployment configurations, upgrade paths or security setups. 
+This proposal is about providing the lowest resistance way to deploy a minimum viable event-streaming infrastructure stack for developers to use and assess for their needs. 
+However, in future, we may provide a more comprehensive stack deployment method using one of the approaches discussed in the [rejected alternatives](#rejected-alternatives) section. 
+This would, of course, be covered by a separate proposal.
 
 ### Prior art
 
@@ -129,7 +135,7 @@ The quick-start repository should be organized into two main layers:
 
 - Base configs (`base/`): Contains the operator deployments and CRD definitions for each component. These are the resources that must be installed first.
 - Stack configs (`stack/`): Contains the operand custom resources (Kafka cluster, Registry instance, Console CR, etc.) that depend on the operators being ready.
-- Overlays (`overlays/`): Optional variant configurations (e.g. OAuth-enabled Kafka, multi-node clusters with Cruise Control enabled) that patch the base or stack layers for different scenarios.
+- Overlays (`overlays/`): Optional variant configurations (e.g. multi-node clusters with Cruise Control enabled) that patch the base or stack layers for different scenarios.
 
 Each layer has its own `kustomization.yaml` that references the component resources it includes. 
 The stack layer uses remote references to pull in base configurations from the same repository.
@@ -142,13 +148,13 @@ The quick-start handles this with a two-phase install:
 Phase 1 — Operators and CRDs:
 
 ```shell
-kubectl apply -k 'https://github.com/streamshub/quickstart-kustomize//dev/base?ref=main'
+kubectl apply -k 'https://github.com/streamshub/developer-quickstart//base?ref=main'
 ```
 
 Phase 2 — Operands:
 
 ```shell
-kubectl apply -k 'https://github.com/streamshub/quickstart-kustomize//dev/stack?ref=main'
+kubectl apply -k 'https://github.com/streamshub/developer-quickstart//stack?ref=main'
 ```
 
 Users need to wait for the operators in Phase 1 to become ready before running Phase 2. 
@@ -159,7 +165,7 @@ The `?ref=` parameter pins the installation to a specific branch or tag.
 To simplify the two-phase process, an optional convenience script can handle the sequencing and readiness checks automatically, as well as give richer progress information:
 
 ```shell
-curl -sL https://raw.githubusercontent.com/streamshub/quickstart-kustomize/main/dev/install.sh | bash
+curl -sL https://raw.githubusercontent.com/streamshub/developer-quickstart/main/install.sh | bash
 ```
 
 This script would:
@@ -189,7 +195,7 @@ All resources deployed by the quick-start should carry a common label via the Ku
 ```yaml
 labels:
   - pairs:
-      app.kubernetes.io/part-of: streamshub-quickstart
+      app.kubernetes.io/part-of: streamshub-developer-quickstart
     includeSelectors: false
 ```
 
@@ -206,11 +212,11 @@ However, labels help with several key issues:
 - Shared-cluster detection: They allow us to query for CRs of the managed CRD types that _do not_ carry the quick-start label. If any unlabeled CRs exist for a given operator's CRD types, then we know that operator's CRDs are shared and should be retained. The uninstall script removes only that operator's Deployments, ServiceAccounts, and other non-CRD resources, while operators whose CRDs have no unlabeled CRs are fully removed including their CRDs.
 - Orphan discovery: After a failed or partial teardown, labels make it straightforward to find leftover quick-start resources across all namespaces:
 ```shell
-kubectl get all -A -l app.kubernetes.io/part-of=streamshub-quickstart
+kubectl get all -A -l app.kubernetes.io/part-of=streamshub-developer-quickstart
 ```
 Note that `kubectl get all` does not cover every resource type (CRDs, ClusterRoles, ClusterRoleBindings, etc.). To find labeled cluster-scoped resources, also run:
 ```shell
-kubectl get crds,clusterroles,clusterrolebindings -l app.kubernetes.io/part-of=streamshub-quickstart
+kubectl get crds,clusterroles,clusterrolebindings -l app.kubernetes.io/part-of=streamshub-developer-quickstart
 ```
 - Auditing: Labels distinguish quick-start-owned resources from independently deployed ones, which is useful for troubleshooting and capacity planning on shared clusters.
 
@@ -220,7 +226,7 @@ Before tearing down, users on non-ephemeral (minkube, KIND, etc) or shared clust
 For example, to check for Strimzi-managed Kafka resources not owned by the quick-start:
 
 ```shell
-kubectl get kafkas -A --selector='!app.kubernetes.io/part-of=streamshub-quickstart'
+kubectl get kafkas -A --selector='!app.kubernetes.io/part-of=streamshub-developer-quickstart'
 ```
 
 Users should repeat this check for each operator group's CR types (e.g. Apicurio Registry CRs, StreamsHub Console CRs) before proceeding with Phase 2.
@@ -231,15 +237,15 @@ If no unlabeled CRs are found for any operator group, it is safe to proceed with
 The [uninstall script](#uninstall-script) automates these per-operator-group checks and is recommended for safe teardown.
 
 For manual teardown, the process has two phases. 
-Under most scenarios it should be safe to remove the operands (`dev/stack`) overlay:
+Under most scenarios it should be safe to remove the operands (`/stack`) overlay:
 
 Phase 1 — Delete operands:
 
 ```shell
-kubectl delete -k 'https://github.com/streamshub/quickstart-kustomize//dev/stack?ref=main'
+kubectl delete -k 'https://github.com/streamshub/developer-quickstart//stack?ref=main'
 ```
 
-If the shared-resource checks above reveal no issues, users can proceed to remove the operator (`dev/base`) overlay:
+If the shared-resource checks above reveal no issues, users can proceed to remove the operator (`/base`) overlay:
 
 Phase 2 — Delete operators and CRDs:
 
@@ -247,7 +253,7 @@ Wait for all custom resources to be fully removed before proceeding.
 This allows the operators to process finalizers and complete their cleanup logic.
 
 ```shell
-kubectl delete -k 'https://github.com/streamshub/quickstart-kustomize//dev/base?ref=main'
+kubectl delete -k 'https://github.com/streamshub/developer-quickstart//base?ref=main'
 ```
 
 Running Phase 2 before Phase 1 completes risks finalizer stalling and, on shared clusters, cascade-deleting CRs that belong to other deployments.
@@ -257,7 +263,7 @@ Running Phase 2 before Phase 1 completes risks finalizer stalling and, on shared
 To complement the `install.sh` convenience script, an `uninstall.sh` script should be provided that automates the sequencing and safety checks:
 
 ```shell
-curl -sL https://raw.githubusercontent.com/streamshub/quickstart-kustomize/main/dev/uninstall.sh | bash
+curl -sL https://raw.githubusercontent.com/streamshub/developer-quickstart/main/uninstall.sh | bash
 ```
 
 This script would:
@@ -290,26 +296,27 @@ The initial quick-start should deploy the following components:
 
 Kustomize overlays make it straightforward to add new configurations without modifying the base stack:
 
-- OAuth overlay: An overlay that patches the Kafka cluster to enable OAuth authentication, potentially using the Keycloak operator for automated realm configuration
 - Kroxylicious overlay: An overlay that adds the Kroxylicious Kafka Proxy to the stack
 - Namespace customization: Overlays or patches that allow deploying into a user-specified namespace
 - Kafka Bridge overlay: An overlay that adds the Strimzi Kafka Bridge for HTTP-based Kafka access
 - Prometheus overlay: An overlay that deploys Prometheus and configures metrics collection from the stack components, enabling the StreamsHub Console's metrics dashboards
 
-A _vanity URL_ (e.g. `streamshub.io/install/dev`) could be a future enhancement layered on top of the Kustomize repository. The vanity URL backend could use Kustomize internally to generate the appropriate YAML, accepting parameters for namespace customization and component selection. This would complement rather than replace the direct GitHub-based Kustomize approach.
+A _vanity URL_ (e.g. `streamshub.io/install/dev`) could be a future enhancement layered on top of the Kustomize repository. 
+The vanity URL backend could use Kustomize internally to generate the appropriate YAML, accepting parameters for namespace customization and component selection. 
+This would complement rather than replace the direct GitHub-based Kustomize approach.
 
 ### Considerations
 
 - De-facto platform: By creating a combined dev-stack installation, we are creating a de-facto "platform" that will need to be tested for compatibility across component releases. Changes to any upstream component could break the stack, so integration testing will be needed.
 - Dev-to-production risk: An opinionated dev-stack install runs the risk of being adopted for production use. The quick-start should include clear documentation that this is a development-only configuration. Resource limits, security configurations and storage settings are not suitable for production.
-- OAuth complexity: Strimzi Kafka OAuth has many possible configurations and security-critical settings. A simple quick-start for OAuth-enabled setups may not be advisable as an initial target, but could be explored as an overlay once the base stack is stable.
+- OAuth complexity: Strimzi Kafka OAuth has many possible configurations and security-critical settings. A simple quick-start for OAuth-enabled setups may not be advisable as an initial target. It would be prudent to leave this to a more robust deployment system, one that can handle production level configurations.
 - CRD deletion on shared clusters: CRD deletion is a cluster-scoped operation that cascade-deletes all custom resources of that type across every namespace. The uninstall script will group CRDs by their parent operator and check each group independently for non-quick-start custom resources. If any CRD in an operator's group has unlabeled CRs, all CRDs for that operator are retained and only non-CRD resources are removed. Operator groups with no shared CRD usage will be fully cleaned up including CRD deletion.
 
 ## Affected/not affected projects
 
 ### Affected
 
-- quickstart-kustomize (new repository): A new repository to be created in the StreamsHub GitHub organization containing all Kustomize configurations, the install script and documentation.
+- developer-quickstart (new repository): A new repository to be created in the StreamsHub GitHub organization containing all Kustomize configurations, the install script and documentation.
 - StreamsHub Console: The Console operator and CR configurations will be referenced in the quick-start. A Console CR configuration that works without authenticated Kafka listeners or Prometheus will need to be defined.
 
 ### Not affected
