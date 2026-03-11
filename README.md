@@ -10,7 +10,8 @@ A template for new proposals can be found [here](./000-template.md).
 File names should follow the format `NNN-title.md` where `NNN` is a three digit number that is incremented for each new proposal.
 File name format and numbering is validated by the CI workflow defined in [validate-proposals.yml](./.github/workflows/validate-proposals.yml).
 
-| #   | Title                                                                           |
-|:--: |:--------------------------------------------------------------------------------|
-| 000 | [StreamsHub Proposal Template](./000-template.md)                               |
+| #   | Title                                                                              |
+|:--: |:-----------------------------------------------------------------------------------|
+| 000 | [StreamsHub Proposal Template](./000-template.md)                                  |
+| 001 | [StreamsHub Quick-start Kustomize Repository](./001-quickstart-kustomize-repo.md)  |
 
