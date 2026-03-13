@@ -51,60 +51,60 @@ The user can also attach [MCP Resources](#mcp-resources) to provide the LLM with
 
 ### "Why is my Kafka cluster not ready?"
 
-**User prompt**: "The Kafka cluster `my-cluster` in namespace `kafka-prod` has been NotReady for 15 minutes. What's going on?"
+**User question**: "The Kafka cluster `my-cluster` in namespace `kafka-prod` has been NotReady for 15 minutes. What's going on?"
 
 **MCP flow** (user selects the `diagnose-cluster-issue` prompt template, which guides the LLM to call the following tools):
-1. `get_resource_status` - reads Kafka CR status and conditions, finds `NotReady` condition with reason
-2. `get_operator_logs` - reads Strimzi operator logs filtered to the relevant time window and namespace, finds reconciliation errors
-3. `get_pod_status` - checks broker pod statuses, finds one pod in CrashLoopBackOff
+1. `get_kafka_cluster` - reads Kafka CR status and conditions, finds `NotReady` condition with reason
+2. `get_strimzi_operator_logs` - reads Strimzi operator logs filtered to the relevant time window and namespace, finds reconciliation errors
+3. `get_kafka_cluster_pods` - checks broker pod statuses, finds one pod in CrashLoopBackOff
 4. LLM correlates findings and decides pod logs are needed
-5. `get_pod_logs` - reads logs from the failing pod (including previous container logs), finds OOM kill
+5. `get_kafka_cluster_logs` - reads logs from the failing pod (including previous container logs), finds OOM kill
 
 **Expected output summary**: broker-2 is in CrashLoopBackOff due to OOM kills (container memory limit is 2Gi but the JVM heap requires more), which is blocking the cluster reconciliation.
 The suggestion would be to increase the memory limit in the KafkaNodePool resource.
 
 ### "Show me all Kafka clusters across namespaces"
 
-**User prompt**: "Give me an overview of all Kafka deployments in the cluster."
+**User question**: "Give me an overview of all Kafka deployments in the cluster."
 
 **MCP flow**:
-1. `list_resources` - discovers all Kafka CRs across namespaces
-2. `get_resource_status` - reads status of each cluster (batched)
-3. `get_operator_status` - checks Strimzi operator deployment status
+1. `list_kafka_clusters` - discovers all Kafka CRs across namespaces
+2. `get_kafka_cluster` - reads status of each cluster (batched)
+3. `get_strimzi_operator` - checks Strimzi operator deployment status
 
 **Expected output summary**: A table of clusters with their namespace, version, number of brokers, readiness status, and any warning conditions.
 
 ### "What are the bootstrap addresses and TLS configuration?"
 
-**User prompt**: "How do I connect to `my-cluster` from outside the Kubernetes cluster?"
+**User question**: "How do I connect to `my-cluster` from outside the Kubernetes cluster?"
 
 **MCP flow**:
-1. `get_bootstrap_servers` - reads listener configurations from Kafka CR status
-2. `get_security_info` - reads certificate metadata (expiry dates, issuers, SANs) from relevant secrets, and authentication type configured on listeners
+1. `get_kafka_bootstrap_servers` - reads listener configurations from Kafka CR status
+2. `get_kafka_cluster_certificates` - reads TLS certificate metadata (expiry dates, issuer, SANs) from Strimzi-managed secrets and authentication type configured on listeners (requires opt-in sensitive Role)
 
 **Expected output summary**: Each listener with its type (internal/external), bootstrap address, port, TLS status, and authentication method.
 For external listeners, also the route/ingress hostname and the certificate expiry date.
 
 ### "Why did broker pods restart overnight?"
 
-**User prompt**: "I noticed broker pods restarted overnight, what happened?"
+**User question**: "I noticed broker pods restarted overnight, what happened?"
 
-**MCP flow** (LLM asks the user for a time range before proceeding):
-1. LLM asks: "Between what hours?" — user answers "2am and 4am"
-2. `get_pod_status` - reads pod restart counts and last termination reasons
-3. `get_pod_logs` - reads previous container logs (from before the restart) for affected pods
-4. `get_operator_logs` - checks if the operator triggered a rolling update in that time window
+**MCP flow** (the prompt template instructs the LLM to ask for a time range when the user doesn't specify one):
+1. LLM asks - "Between what hours?" - user answers "2am and 4am"
+2. `get_kafka_cluster_pods` - reads pod restart counts and last termination reasons
+3. `get_kafka_cluster_logs` - reads previous container logs (from before the restart) for affected pods
+4. `get_strimzi_operator_logs` - checks if the operator triggered a rolling update in that time window
 
 **Expected output summary**: Whether restarts were caused by an operator-initiated rolling update (configuration change, certificate renewal) or by pod failures (OOM, liveness probe timeout).
 
 ### "Are there any problematic KafkaTopics?"
 
-**User prompt**: "Check if there are any KafkaTopics with issues in namespace `kafka-prod`."
+**User question**: "Check if there are any KafkaTopics with issues in namespace `kafka-prod`."
 
 **MCP flow**:
-1. `list_resources` - finds all KafkaTopic CRs in the namespace (paginated if there are many)
-2. `get_resource_status` - reads status and conditions for each topic, filters for non-Ready topics
-3. LLM reports: 150 topics found, 3 are not Ready. Shows details for each problematic topic.
+1. `list_kafka_topics` - finds all KafkaTopic CRs in the namespace (paginated if there are many)
+2. `get_kafka_topic` - reads status and conditions for each topic, filters for non-Ready topics
+3. LLM reports - 150 topics found, 3 are not Ready. Shows details for each problematic topic.
 
 **Expected output summary**: 3 KafkaTopics have issues — `orders-events` has a `NotReady` condition due to insufficient brokers for the configured replication factor, `audit-log` has a stalled reconciliation, and `temp-test` has a config mismatch between the CR spec and the actual topic config.
 
@@ -157,8 +157,8 @@ Each tool accepts structured JSON input validated against a JSON Schema and retu
 #### Network and Connectivity
 - **Find Bootstrap Servers**: Read Kafka bootstrap server addresses from the Kafka CR status.
   Returns listener type, address, port, and protocol.
-- **Security Info**: Read TLS certificate metadata (expiry date, issuer, SANs) and authentication type from Kubernetes secrets.
-  See [Output sanitization](#security--rbac) for details on what is excluded.
+- **Cluster Certificates**: Read TLS certificate metadata (expiry date, issuer, SANs) and authentication type from Strimzi-managed Kubernetes secrets (`get_kafka_cluster_certificates`).
+  Requires the opt-in sensitive Role. See [Output sanitization](#security--rbac) for details on what is excluded.
 
 #### Logs and Pod Info
 - **Read Logs**: Get logs from Kafka broker and controller pods, Strimzi operator, and other Strimzi related pods.
@@ -179,8 +179,8 @@ Each tool accepts structured JSON input validated against a JSON Schema and retu
 Each tool returns data as a structured JSON DTO that removes noise from raw Kubernetes API responses.
 
 **What DTOs remove**:
-- `metadata.managedFields`:internal Kubernetes bookkeeping, typically 100+ lines of noise
-- `metadata.annotations` with `kubectl.kubernetes.io/last-applied-configuration`:duplicated resource spec
+- `metadata.managedFields`: internal Kubernetes bookkeeping, typically 100+ lines of noise
+- `metadata.annotations` with `kubectl.kubernetes.io/last-applied-configuration`: duplicated resource spec
 - Internal status fields not relevant to diagnostics (e.g., `observedGeneration` is kept, but raw status metadata is removed)
 - Empty or null fields
 
@@ -190,12 +190,11 @@ Each tool returns data as a structured JSON DTO that removes noise from raw Kube
 - Configuration relevant to diagnostics (listeners, storage, replicas, resource limits)
 - Relationships between resources (which KafkaNodePools belong to which Kafka cluster)
 
-##### Example: `get_resource_status` tool
+##### Example: `get_kafka_cluster` tool
 
 **Input**:
 ```json
 {
-  "resourceType": "Kafka",
   "namespace": "kafka-prod",
   "name": "my-cluster"
 }
@@ -237,7 +236,7 @@ Each tool returns data as a structured JSON DTO that removes noise from raw Kube
 }
 ```
 
-##### Example: `get_pod_status` tool
+##### Example: `get_kafka_cluster_pods` tool
 
 **Input**:
 ```json
@@ -337,15 +336,57 @@ Quarkus MCP Server supports prompt templates via the `@Prompt` annotation, see t
 
 Template name: `diagnose-cluster-issue`
 
-Parameters: `namespace`, `cluster_name`, `symptom` (optional)
+Parameters: `cluster_name`, `namespace` (optional), `symptom` (optional)
 
-Guides the LLM to:
-1. Check the Kafka CR status and conditions, look for NotReady, warnings, stalled reconciliation.
-2. Check KafkaNodePool statuses, look for pools with fewer ready replicas than expected.
-3. Read operator logs, filter for errors and warnings in the relevant time window.
-4. Check pod statuses, look for CrashLoopBackOff, pending pods, restart counts.
-5. Read pod logs from unhealthy pods, look for OOM, disk full, connection refused patterns.
-6. Correlate findings, distinguish between operator-initiated changes and failures.
+When the user selects this template, the MCP server generates a prompt message that guides the LLM through a structured diagnostic workflow.
+Below is an example of what the generated prompt can look like:
+
+```
+You are diagnosing a Kafka cluster issue for cluster `my-cluster` in namespace `kafka-prod`.
+The reported symptom is: NotReady for 15 minutes.
+
+Follow these steps in order. After each step, analyze the results before proceeding to the next.
+
+## Step 1: Check Kafka cluster status
+Use `get_kafka_cluster` to retrieve the cluster status and conditions.
+Look for: NotReady conditions, stalled reconciliation,
+mismatched observed/expected generation, warning conditions.
+
+## Step 2: Check KafkaNodePool statuses
+Use `list_kafka_node_pools` to list all node pools for this cluster.
+For any pool that looks unhealthy, use `get_kafka_node_pool` for details.
+Look for: pools with fewer ready replicas than expected,
+pools in non-Ready state, role mismatches.
+
+## Step 3: Check Strimzi operator
+Use `list_strimzi_operators` to find the operator managing this cluster.
+Use `get_strimzi_operator_logs` with `sinceMinutes: 15` to read recent operator logs.
+Look for: reconciliation errors, exceptions, warnings related to
+`my-cluster`, repeated error patterns.
+
+## Step 4: Check pod health
+Use `get_kafka_cluster_pods` to check all pods for the cluster.
+Look for: CrashLoopBackOff, Pending pods, high restart counts,
+pods not in Running phase, containers not ready.
+
+## Step 5: Read pod logs from unhealthy pods
+For any unhealthy pods found in Step 4, use `get_kafka_cluster_logs`
+with keywords `["ERROR", "Exception", "OOM"]` and `sinceMinutes: 15` to get recent error logs.
+Look for: OOM kill messages, disk full errors, connection refused,
+`OutOfMemoryError`, `IOException`.
+
+## Step 6: Correlate and summarize
+Correlate the findings from all steps.
+Distinguish between:
+- Operator-initiated changes (rolling updates, certificate renewal, configuration changes)
+- Infrastructure failures (OOM, disk full, node issues)
+- Configuration errors (invalid resource specs, missing secrets)
+
+Provide a clear summary of the root cause and actionable recommendations.
+```
+
+The prompt template tells the LLM exactly which tools to call, what to look for in the results, and how to correlate findings across steps.
+The tool names in the template match the actual MCP tool names registered by the server.
 
 #### Connectivity Troubleshooting Template
 
@@ -359,7 +400,7 @@ Guides the LLM to check listener configuration, bootstrap addresses, TLS certifi
 
 The MCP server supports two approaches to diagnostic workflows:
 
-**Client-driven (prompt templates + fine-grained tools)**: The user selects a [prompt template](#mcp-prompt-templates), which the LLM then follows — calling fine-grained tools one by one (`get_resource_status`, `get_pod_logs`, etc.), reasoning about results between calls, and asking the user for clarification when needed.
+**Client-driven (prompt templates + fine-grained tools)**: The user selects a [prompt template](#mcp-prompt-templates), which the LLM then follows — calling fine-grained tools one by one (`get_kafka_cluster`, `get_kafka_cluster_logs`, etc.), reasoning about results between calls, and asking the user for clarification when needed.
 This works with every MCP client since prompt templates are just text and tools are standard MCP tool calls.
 
 **Server-driven (composite tools with Sampling and Elicitation)**: The composite `diagnose_cluster` tool internally orchestrates multiple steps.
@@ -406,6 +447,7 @@ The tool layer stays the same regardless of which provider is active.
 4. Every request passes through all active filters in priority order — input validation first, then output sanitization, then any custom filters.
 
 This way filters compose rather than replace each other.
+Each MCP server module can define its own filters with different priorities, and individual filters can be enabled or disabled via configuration.
 Provider and filter interfaces live in the `common` module so they can be reused by other MCP servers.
 
 #### Security & RBAC
@@ -414,8 +456,10 @@ Provider and filter interfaces live in the `common` module so they can be reused
 The MCP server uses its own Service Account with a minimal ClusterRole.
 It does NOT use the Strimzi Cluster Operator Service Account.
 
-The ClusterRole only grants `get`, `list`, and `watch` permissions on the resources the MCP server needs.
-It is modeled on the existing [strimzi-view](https://github.com/strimzi/strimzi-kafka-operator/blob/main/packaging/install/strimzi-admin/020-ClusterRole-strimzi-view.yaml) ClusterRole:
+RBAC is split into two layers: a **ClusterRole** for non-sensitive resources (safe to grant cluster-wide) and an optional **Role** for sensitive resources (opt-in per namespace).
+Both are modeled on the existing [strimzi-view](https://github.com/strimzi/strimzi-kafka-operator/blob/main/packaging/install/strimzi-admin/020-ClusterRole-strimzi-view.yaml) ClusterRole.
+
+**ClusterRole** (default, non-sensitive):
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -448,7 +492,7 @@ rules:
     verbs: ["get", "list"]
   # Pods, logs, and services
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "pods/proxy", "services", "secrets"]
+    resources: ["pods", "pods/log", "services"]
     verbs: ["get", "list"]
   # ConfigMaps (logging overrides, external configuration references)
   - apiGroups: [""]
@@ -468,14 +512,39 @@ rules:
     verbs: ["get", "list"]
 ```
 
+**Role** (opt-in per namespace, sensitive resources):
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: streamshub-strimzi-mcp-sensitive
+  namespace: kafka-prod  # deployed per namespace where access is needed
+  labels:
+    app: streamshub-strimzi-mcp
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  # Only required when using the default pod-scraping metrics provider.
+  - apiGroups: [""]
+    resources: ["pods/proxy"]
+    verbs: ["get"]
+```
+
+The sensitive Role is opt-in: deployers add it only to namespaces where certificate checking or direct metrics scraping is needed.
+The `secrets` permission only grants `get` (not `list`) because Strimzi secret names follow a predictable pattern derived from the Kafka CR name (e.g., `{cluster}-cluster-ca-cert`, `{cluster}-clients-ca-cert`).
+Since RBAC cannot restrict access by label, the MCP server enforces an application-level check: it only requests secrets whose names match the Strimzi naming convention and verifies the `strimzi.io/cluster` label on the returned secret before processing it.
+
 **Authorization model**:
 The initial authorization model relies entirely on Kubernetes RBAC — the MCP server can only access what its Service Account is allowed to.
 
-For a single-team setup, one MCP server instance with a ClusterRoleBinding gives access to Strimzi resources across all namespaces.
+For a single-team setup, one MCP server instance with a ClusterRoleBinding (for the ClusterRole) and RoleBindings (for the sensitive Role in each namespace) gives access to Strimzi resources.
 
 For multi-tenant deployments where different teams should only see their own namespaces, the approach is to deploy separate MCP server instances per team, each with:
 - Its own ServiceAccount.
 - A namespaced RoleBinding (instead of a ClusterRoleBinding) scoped to that team's namespaces.
+- The sensitive Role only in namespaces where the team needs certificate or metrics access.
 - A separate Service endpoint that only the team's LLM clients connect to.
 
 This way, team A's MCP server can only see Strimzi resources in team A's namespaces, and team B has no access to team A's data.
@@ -514,7 +583,7 @@ Log retrieval needs some care to avoid returning too much data or leaking sensit
 - **Server-side filtering**: Logs are filtered server-side before being returned — the MCP server does the filtering, not the LLM.
   Supported filters:
   - **Severity level**: Filter by log level (ERROR, WARN, INFO) to return only relevant entries. This depends on parsing the log format (log4j2 for Strimzi operator, configurable for Kafka brokers) and is best-effort.
-  - **Time range**: `sinceSeconds` or `sinceTime` parameters to limit logs to a specific window.
+  - **Time range**: `sinceSeconds`, `sinceMinutes`, or `sinceTime` parameters to limit logs to a specific window.
   - **Pod name**: Target specific pods instead of retrieving logs from all pods.
   - **Keyword matching**: A `keywords` parameter accepts a list of keywords to return only matching lines (e.g., `["Exception", "ERROR", "OOM"]` to get only error-related output).
     The server converts keywords to safe, pre-validated patterns internally — users never supply raw regex.
@@ -528,6 +597,7 @@ Log retrieval needs some care to avoid returning too much data or leaking sensit
   To determine if more data is available, the server requests one more line than `tailLines` — if it gets back more, it sets `hasMore = true` in the response and returns only the requested amount.
 - **Request throttling**: Log requests are rate-limited to protect the Kubernetes API server from too much load.
 - **Sensitive data redaction**: Log lines are scanned for common sensitive patterns (bearer tokens, passwords, connection strings, API keys) and redacted before being returned.
+  The default redaction patterns are configurable, and users can add custom patterns via configuration to cover application-specific sensitive data.
 
 **Pluggable log provider**: Log retrieval should be implemented behind a provider interface so that different backends can be used.
 The default implementation reads logs directly from Kubernetes pod logs via the Fabric8 client.
@@ -547,12 +617,13 @@ Other providers (e.g., for Prometheus or other metrics systems) can be added lat
 **Prometheus API integration** (querying an existing Prometheus instance for historical and aggregated metrics) **is explicitly out of scope** for this proposal and can be added as a separate metrics provider later.
 
 **Caveats**:
-- Metrics port: The server auto-detects the metrics port from the pod spec container ports (Strimzi Metrics Reporter defaults to 8080, JMX exporter typically 9404).
-- Custom metric names: Strimzi and Kafka metric names can be customized by users, so the MCP server will need configurable metric name mappings.
-- RBAC: Direct pod scraping needs `get` on `pods/proxy` (included in the ClusterRole above).
+- Metrics port - The server auto-detects the metrics port from the pod spec container ports (Strimzi Metrics Reporter defaults to 8080, JMX exporter typically 9404).
+- Custom metric names - Strimzi and Kafka metric names can be customized by users.
+  The MCP server can read the `metricsConfig` from the Kafka CR, which references a ConfigMap with the JMX exporter or Metrics Reporter configuration, to discover metric name mappings programmatically.
+- RBAC - Direct pod scraping needs `get` on `pods/proxy` (included in the optional sensitive Role, not the default ClusterRole).
 - Direct pod scraping only gives point-in-time metrics, no historical data.
   For historical data, a Prometheus provider would be needed.
-- Scraping load: Direct pod scraping adds load to the broker/controller pods.
+- Scraping load - Direct pod scraping adds load to the broker/controller pods.
   During incidents this could make things worse, so metrics requests should be rate-limited (same as log requests).
   For production use, a centralized metrics system that has already collected the data is preferred.
 
@@ -578,8 +649,8 @@ The Strimzi MCP server is delivered as a container image built with Quarkus (JVM
 
 **Configuration**:
 Everything is configured via environment variables:
-- `MCP_NAMESPACES`: Comma-separated list of namespaces to watch (empty = all namespaces).
-- `MCP_LOG_TAIL_LINES`: Default `tailLines` value for log requests (default: 200).
+- `MCP_NAMESPACES` - Comma-separated list of namespaces to watch (empty = all namespaces).
+- `MCP_LOG_TAIL_LINES` - Default `tailLines` value for log requests (default: 200).
 
 **Scalability**:
 The MCP server is stateless — it holds no session data between requests.
@@ -587,8 +658,8 @@ Multiple replicas can run behind a Kubernetes Service for horizontal scaling.
 Multiple LLM clients can connect simultaneously since Quarkus handles concurrent requests out of the box.
 
 **Health endpoints**:
-- `/q/health/live`:liveness probe.
-- `/q/health/ready`:readiness probe (checks Kubernetes API connectivity).
+- `/q/health/live` - liveness probe.
+- `/q/health/ready` - readiness probe (checks Kubernetes API connectivity).
 
 ## Differentiation from Existing Tools
 
@@ -608,12 +679,12 @@ The Strimzi MCP server is complementary to generic Kubernetes MCP tools and does
 
 ## Compatibility
 
-- **Strimzi versions**: Targets Strimzi 0.51.x and newer, using the `v1` Strimzi API exclusively.
+- **Strimzi versions** - Targets Strimzi 0.51.x and newer, using the `v1` Strimzi API exclusively.
   The `v1beta2` API is not supported — this avoids maintaining compatibility with deprecated CRD versions.
-- **Kubernetes versions**: Kubernetes 1.30+ and OpenShift 4.16+.
-- **MCP protocol**: Follows the current MCP specification.
+- **Kubernetes versions** - Kubernetes 1.30+ and OpenShift 4.16+.
+- **MCP protocol** - Follows the current MCP specification.
   Can be updated when MCP evolves.
-- **Kubernetes distributions**: Works with OpenShift, EKS, GKE, AKS, and other Kubernetes distributions.
+- **Kubernetes distributions** - Works with OpenShift, EKS, GKE, AKS, and other Kubernetes distributions.
 
 ## Affected projects
 
