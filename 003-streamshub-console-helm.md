@@ -49,12 +49,13 @@ Chart versioning will be **independent from the operator version**.
  
 Chart and operator versions will naturally diverge over time - for example, when a chart only fix is needed without an operator release.
 Starting from an independent versioning scheme avoids confusion from the outset.
+Chart versioning will follow the format <CONSOLE_VERSION>-<CHART_PATCH> (e.g. 1.0.0 for the initial release, 1.0.0-1 if a chart-only fix follows).
+This keeps the chart version anchored to the specific operator release it targets, while still allowing chart only patch releases without requiring an operator release. 
 A clear mapping between chart versions and compatible operator versions will be maintained on the release page and in the documentation.
 
 ## CRD management
 
 CRD lifecycle management in Helm has known limitations that need to be addressed explicitly.
-Understanding these is important both for the standalone chart and for potential future use as a subchart.
 
 ### The core CRDs problem
 
@@ -63,9 +64,9 @@ Helm's built-in CRD support - placing CRDs in the `crds/` directory - has two si
 1. **CRDs in `crds/` are not upgraded during `helm upgrade`**. This creates version drift risk: a new operator release may depend on an updated CRD schema or a new stored version that is not present in the cluster after a routine upgrade.
 2. **CRDs in subcharts are silently skipped**. If this chart is later used as a subchart in an umbrella chart, Helm only processes CRDs from the top-level chart's `crds/` directory. Any CRDs in subchart `crds/` directories are silently ignored on install, meaning the Console CRDs would not be present when the operator tries to reconcile.
 
-### Recommended approach
+### Solution
 
-The recommended approach is the **`crds/` directory pattern**, consistent with how Strimzi manages its CRDs.
+CRDs will be managed using the **`crds/` directory pattern**, consistent with how Strimzi manages its CRDs.
 
 CRDs are installed automatically on `helm install`. The CRD upgrade limitation must be explicitly documented: users must manually apply updated CRDs before upgrading the operator chart (e.g. `kubectl apply -f crds/`).
 This is the exactly same pattern Strimzi uses and is an understood trade-off in the Helm ecosystem.
