@@ -1,28 +1,16 @@
-# StreamsHub Console: Adopt `streamshub.io` as the Canonical Namespace
+# StreamsHub Console: Migrate the Console CRD API Group to `console.streamshub.io`
 
 This proposal applies to the StreamsHub Console project (the `streamshub/console` repository).
-It recommends adopting `streamshub.io`, the domain now owned by the StreamsHub organization, as the canonical namespace for the Console project's public identifiers:
+It recommends migrating the Console operator's Kubernetes CRD API group from `console.streamshub.github.com` to `console.streamshub.io`, the domain now owned by the StreamsHub organization.
 
-1. The Maven `groupId`, changing from `com.github.streamshub` to `io.streamshub`.
-2. The Console operator's Kubernetes CRD API group, changing from `console.streamshub.github.com` to `console.streamshub.io`.
-
-Both identifiers today derive from the project's GitHub location (`github.com/streamshub`) rather than from a domain the organization controls.
-The two changes are the same underlying decision so they are proposed together.
-The `groupId` change is a mechanical, low-risk rename with no external consumers.
+The API group today derives from the project's GitHub location (`github.com/streamshub`) rather than from a domain the organization controls.
 The CRD API group change is a public API change affecting existing Console operator installations, so the bulk of this proposal is a migration plan for users who already have the Console CRD deployed.
 
+A companion, purely mechanical change — renaming the Maven `groupId` and Java base package from `com.github.streamshub` to `io.streamshub` — is being handled separately and immediately, because it has no external consumers and need not wait on the CRD migration.
+It is tracked as its own [upstream issue](https://github.com/streamshub/console/issues/3117) (motivated by the related [upstream request](https://github.com/streamshub/console/issues/2900) to publish the Console operator's CRD Java classes as reusable artifacts).
+Both changes adopt `streamshub.io` as the canonical namespace, but only the CRD group change carries migration risk, which is why it has its own proposal.
+
 ## Current situation
-
-### Maven `groupId`
-
-The Console repository is a Maven multi-module build whose `groupId` is `com.github.streamshub` across all modules (`root`, `api`, `common`, `coverage`, `operator`, `systemtests` and `ui`).
-The Java packages for the first-party source follow the same base package (`com.github.streamshub.console.*` and `com.github.streamshub.systemtests.*`).
-
-Nothing has ever been published under this `groupId`.
-There is no `distributionManagement`, no Sonatype/OSSRH configuration, no artifact-signing plugin and no publish step in CI (the release build runs with `-Dmaven.deploy.skip=true`).
-In other words, there are no external consumers of these Maven coordinates today.
-
-### Console CRD API group
 
 The Console operator registers its custom resource under the API group `console.streamshub.github.com`, currently at version `v1alpha1`:
 
@@ -41,7 +29,7 @@ metadata:
   name: my-console
 ```
 
-Unlike the Maven `groupId`, this identifier does have real-world exposure.
+This identifier has real-world exposure.
 The operator has a continuous release history and is distributed through an OLM bundle and catalog (`console-operator-bundle` and `console-operator-catalog`) with an upgrade channel graph chaining releases together.
 It is also installable directly from manifests with `kubectl apply`.
 We know that there are clusters with `Console` custom resources already deployed under `console.streamshub.github.com/v1alpha1`, some via OLM Subscriptions that may upgrade automatically.
@@ -53,36 +41,15 @@ So this makes the change a genuine public API change requiring a migration plan,
 ## Motivation
 
 `streamshub.io` is now owned by the StreamsHub organization.
-Both `com.github.streamshub` and `console.streamshub.github.com` were derived from the project's GitHub location, not from a domain the organization actually controls.
-Neither is a legitimate reverse-domain identifier for an organization-owned project.
+`console.streamshub.github.com` was derived from the project's GitHub location, not from a domain the organization actually controls, and is not a legitimate reverse-domain identifier for an organization-owned project.
 
-- Maven Central publishing.
-  Publishing to Maven Central requires proving ownership of the `groupId` namespace, and that verification is domain-based (a DNS `TXT` record proving control of `streamshub.io`).
-  A `com.github.streamshub` namespace would instead be verified against a GitHub account, which is the mechanism intended for personal namespaces rather than organization projects.
-  There is an active [upstream request](https://github.com/streamshub/console/issues/2900) to publish the Console operator's CRD Java classes as reusable artifacts so that downstream tooling can depend on the Console POJOs.
-  The `groupId` should be settled before that publishing work begins, so that artifacts are never published under a name we intend to abandon.
 - Consistency and correctness.
-  Aligning both the Maven and Kubernetes identifiers on `streamshub.io` gives the Console project one coherent, verifiable namespace instead of two GitHub-derived approximations.
+  Moving the Kubernetes API group onto `streamshub.io` gives the Console project one coherent, verifiable namespace instead of a GitHub-derived approximation, aligned with the companion Maven `groupId` rename.
 - Timing.
-  This is the cheapest possible moment to make the change.
-  Neither identifier has external consumers that a rename cannot reach today, but that window closes as soon as artifacts are published to Maven Central and as more operator releases accumulate.
-  Doing both renames together, and now, avoids paying an integration and communication cost twice.
+  This is the cheapest the migration will ever be.
+  Every additional operator release and every additional deployed `Console` custom resource increases the number of installations that must eventually migrate, so the cost of the rename grows the longer it is deferred.
 
 ## Proposal
-
-The two changes differ enormously in risk and effort, so they are described separately.
-
-### Part 1: Maven `groupId` (`com.github.streamshub` to `io.streamshub`)
-
-This is a purely mechanical change with no migration story, because there are no published artifacts and no external consumers.
-
-- Update the `<groupId>` (and the corresponding `<parent>` and inter-module `<dependency>` coordinates) in all module POMs.
-- Move the Java sources from `com/github/streamshub/...` to `io/streamshub/...`, updating package declarations and imports (an IDE-assisted refactor rather than hand edits).
-- Update the hard-coded package-path patterns in the build configuration: the Sonar exclusion paths that embed `com/github/streamshub/...` in the root POM, and the JaCoCo exclude patterns that embed the same paths in the `api` and `coverage` POMs.
-
-This can land in a single release with no user-facing impact.
-
-### Part 2: CRD API group (`console.streamshub.github.com` to `console.streamshub.io`)
 
 Two properties of this specific change make it less onerous than other API migrations:
 
@@ -99,7 +66,7 @@ It should be noted upfront that Kubernetes' built-in version-conversion machiner
 Conversion webhooks convert only between versions within a single group, not across groups, and `kube-storage-version-migrator` likewise operates within a single group.
 Neither applies to a cross-group rename.
 
-#### Phase 1: Dual Console CRD serving Operator
+### Phase 1: Dual Console CRD serving Operator
 
 - Ship a new CRD `consoles.console.streamshub.io` at `v1alpha1` with a identical schema, alongside the existing `consoles.console.streamshub.github.com`.
 - Run two controllers in the same operator binary, one watching each group, reconciling both identically.
@@ -138,9 +105,9 @@ When the operator creates the child resources for a Console, such as its Deploym
 During the migration window both groups are served at once, so an old-group Console and a new-group Console with the same name produce child resources with the same names.
 Each controller then sees those children and assumes they are its own to manage, and without protection the two controllers would repeatedly overwrite each other's work.
 The Phase 1 guard prevents this: it works out which Console actually owns the running children and stops the other controller from touching them until the user completes the migration.
-This guard, rather than the duplicated reconciliation logic, is the part of Part 2 that carries genuine risk and deserves the most careful design.
+This guard, rather than the duplicated reconciliation logic, is the part of this migration that carries genuine risk and deserves the most careful design.
 
-#### Phase 2: User initiated CRD migration 
+### Phase 2: User initiated CRD migration 
 
 Because the schema is identical, migration for a user is simply changing the `apiVersion` from `console.streamshub.github.com/v1alpha1` to `console.streamshub.io/v1alpha1` in their source manifests and re-applying.
 
@@ -160,7 +127,7 @@ The operator should not create new-group CRs on the user's behalf.
 Doing so produces objects that the user's GitOps controller does not own, which causes drift and adoption conflicts.
 Migration is user-driven and declarative.
 
-#### Phase 3: Removal of old group CRDs
+### Phase 3: Removal of old group CRDs
 
 - Remove the old-group controller and remove the old CRD from the operator deliverables.
 - OLM: the CSV drops the old CRD from `owned`.
@@ -197,26 +164,20 @@ These are the points the community should settle when reviewing this proposal:
 
 Only the `streamshub/console` repository is affected.
 
-- The Maven `groupId` change touches every module in that repository (`root`, `api`, `common`, `coverage`, `operator`, `systemtests` and `ui`).
-  Note that `ui` is not part of the Maven reactor and currently points at a stale parent version, so it must be updated by hand rather than swept up by a reactor-wide build.
 - The CRD API group change touches the `operator` module, its RBAC and OLM bundle manifests, the CI workflows that reference the generated CRD file by name, the system tests (which currently hard-code the CRD file name) and the documentation and example manifests.
 
-No other project in the StreamsHub organization references either identifier, so no other project is affected.
+No other project in the StreamsHub organization references this identifier, so no other project is affected.
 Third-party operator and CRD dependencies used by the Console operator (Strimzi and Fabric8) are unrelated and unaffected.
 
 ## Compatibility
 
-- Maven `groupId`: source-compatible with everything, because there are no existing consumers to break.
-  This is why it can be a straightforward one-release change.
-- CRD API group: this is a breaking change to a public API, which is precisely why the phased plan above exists.
-  During Phase 1 both groups are served, so nothing breaks for existing users until they choose to migrate.
-  Kubernetes' native version-conversion mechanisms (conversion webhooks and `kube-storage-version-migrator`) do not apply to a cross-group rename.
-  All in-repo references to the old group must be updated in lock-step during Phase 1: the operator `ClusterRole`, the OLM bundle CSVs and channel definitions, the generated CRD manifest file names, the system-test that hard-codes the CRD file name and the documentation and example manifests.
+The CRD API group change is a breaking change to a public API, which is precisely why the phased plan above exists.
+During Phase 1 both groups are served, so nothing breaks for existing users until they choose to migrate.
+Kubernetes' native version-conversion mechanisms (conversion webhooks and `kube-storage-version-migrator`) do not apply to a cross-group rename.
+All in-repo references to the old group must be updated in lock-step during Phase 1: the operator `ClusterRole`, the OLM bundle CSVs and channel definitions, the generated CRD manifest file names, the system-test that hard-codes the CRD file name and the documentation and example manifests.
 
 ## Rejected alternatives
 
-- Splitting this into two separate proposals (Maven `groupId` alone and CRD group alone).
-  Rejected: they are the same underlying decision, adopting `streamshub.io` as the canonical namespace, and reviewers benefit from weighing them and the prior art together.
 - A hard cutover in the style of cert-manager: back up all resources, uninstall the old CRDs, reinstall, then restore under the new group.
   cert-manager did this for its `certmanager.k8s.io` to `cert-manager.io` rename and it was painful, but that migration also changed schemas, renamed annotation prefixes and removed fields in the same release, which forced the heavyweight process.
   Our change is a pure group swap with an identical schema and no annotations, so a declarative `apiVersion` re-apply during a dual-serve window is sufficient.
