@@ -16,4 +16,5 @@ File name format and numbering is validated by the CI workflow defined in [valid
 | 001 | [StreamsHub Quick-start Kustomize Repository](./001-quickstart-kustomize-repo.md) |
 | 002 | [StreamsHub MCP: Strimzi MCP proposal](./002-streamshub-mcp-strimzi.md)           |
 | 003 | [Donation of streamshub-mcp to Strimzi](./003-donate-streamshub-mcp-to-strimzi.md) |
+| 004 | [StreamsHub Console: Adopt `streamshub.io` as the Canonical Namespace](./003-streamshub-io-namespace-migration.md) |
 
