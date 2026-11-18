@@ -161,6 +161,12 @@ We address this with two complementary measures:
 - Break-glass recovery (mandatory).
   The gate cannot help anyone already stuck such as a plain-manifest user who applied the Phase 3 version by hand or an OLM admin who overrode the condition, so we also document a manual recovery: remove the finalizer on the leftover old-group CR, delete its orphaned cluster RBAC (`ConsoleClusterRole`, `ConsoleClusterRoleBinding` and any monitoring bindings) by their `<namespace>-<name>-<resource>` names, then apply the new-group CR.
 
+### Deprecation Window
+
+We propose that the deprecation window, the period over which we carry both controllers, cover 2 minor releases (allowing a release to patch any issues found).
+
+The current proposal is to do this work in 0.17, carry it in 0.18 and remove the old CRDs in 0.19 or 0.20 (depending on user feedback). 
+
 ### Open questions
 
 These are the points the community should settle when reviewing this proposal:
@@ -168,8 +174,6 @@ These are the points the community should settle when reviewing this proposal:
 - Downtime tolerance.
   The recommended migration accepts a brief restart per Console.
   Whether zero-downtime is a hard requirement is worth confirming, since requiring it would mean revisiting the operator-assisted adoption approach in Rejected alternatives.
-- Deprecation window length.
-  How many releases the old group remains served before removal (for example two to three minor releases).
 - OLM channel.
   Whether Phase 1 ships on the existing `alpha` channel or a new channel.
 - Duplicate-management guard.
