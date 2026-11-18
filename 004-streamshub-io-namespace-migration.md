@@ -85,12 +85,13 @@ Neither applies to a cross-group rename.
 - Update all user-facing references to the new group: documentation, example manifests and the `README`.
 - OLM: the ClusterServiceVersion declares both CRDs as `owned`, with RBAC covering both groups, so OLM continues to manage the old CRD through the transition and does not drop it mid-upgrade.
 - Plain manifests: ship both CRD manifests and grant both groups in the operator's `ClusterRole` for the duration of the migration window.
-- Guard against duplicate management: because both controllers run at once, the operator detects when a Console of the same name exists under both groups and refuses to reconcile the one that is not already managing the running child resources, reporting the conflict on its status.
-  This ensures the two controllers never fight over the same child `Deployment`, `Service` and so on, and it gives the user a clear signal to finish the migration by removing the old resource.
-  This guard is the safety mechanism for the migration approach in Phase 2.
+- Guard against duplicate management: because both controllers run at once, the operator detects when a Console of the same name exists under both groups and refuses to reconcile the one that is not already managing the running resources, reporting the conflict on its status.
+  This must cover both the namespaced children (`Deployment`, `Service`, `Secret` and so on) and the cluster-scoped RBAC (`ConsoleClusterRole`, `ConsoleClusterRoleBinding` and any monitoring bindings), both of which share names across the two groups.
+  This guard is the safety mechanism for the Phase 2 migration, and it gives the user a clear signal to finish the migration by removing the old resource.
   It is incompatible with the operator-assisted adoption approach described under Rejected alternatives, which deliberately relies on both resources existing at once. 
   
-Implementation note.
+Implementation note:
+
 The operator framework binds each controller to a single custom resource type, so serving a second API group means running a second controller rather than teaching one controller two types.
 Standing up that controller is inexpensive; the weight of the change lies in what the two controllers share.
 
@@ -100,12 +101,7 @@ This leaves a straightforward choice: write one shared implementation that serve
 Because this migration is temporary and the old group is removed in Phase 3, we favour keeping two copies that we will later delete over building a shared abstraction that we would then have to take apart.
 In practice the new group becomes the main, maintained implementation now, and the old group is added as a second copy that is discarded once the migration is complete.
 
-The real design work is not sharing logic but preventing the two controllers from fighting over the same resources.
-When the operator creates the child resources for a Console, such as its Deployment and Service, it names them after the Console and manages them the same way regardless of which API group the Console belongs to.
-During the migration window both groups are served at once, so an old-group Console and a new-group Console with the same name produce child resources with the same names.
-Each controller then sees those children and assumes they are its own to manage, and without protection the two controllers would repeatedly overwrite each other's work.
-The Phase 1 guard prevents this: it works out which Console actually owns the running children and stops the other controller from touching them until the user completes the migration.
-This guard, rather than the duplicated reconciliation logic, is the part of this migration that carries genuine risk and deserves the most careful design.
+The real design work, however, is not sharing this logic but the duplicate-management guard described above: with both groups served, a same-named old- and new-group Console produce identically-named resources, so preventing the two controllers from fighting over them is the part of this migration that carries genuine risk and deserves the most careful design.
 
 ### Phase 2: User initiated CRD migration 
 
@@ -117,7 +113,16 @@ So an old-group `my-console` and a new-group `my-console` would both try to mana
 
 To handle this, a user would need to perform a brief planned restart per Console. 
 This approach has the advantage of requiring no extra operator code.
-We will document a per-Console delete-old then apply-new sequence: export the existing CR, change its `apiVersion`, delete the old CR (which garbage-collects its children via owner references) then apply the new CR (which the operator recreates children for).
+We will document a per-Console delete-old then apply-new sequence: export the existing CR, change its `apiVersion`, delete the old CR, wait for it to be fully removed, then apply the new CR (which the operator recreates children for).
+
+Deleting the old CR tears down its children in two different ways, and both must complete before the new CR is applied.
+The namespaced children (`Deployment`, `Service`, `Secret` and so on) are garbage-collected via their owner references.
+The cluster-scoped RBAC (`ConsoleClusterRole`, `ConsoleClusterRoleBinding` and any monitoring bindings) cannot carry an owner reference to a namespaced CR, so it is removed instead by the operator's reconciler cleanup (`ConsoleReconciler implements Cleaner`) behind a finalizer.
+This cleanup only runs while the old-group controller is still present, which it is throughout Phase 2.
+The user should therefore wait for the old CR to disappear completely (finalizer cleared) before applying the new one, so the new CR does not contend with the cluster-scoped RBAC the old CR has not yet released.
+If the order is not respected and both briefly coexist, the Phase 1 guard catches it: it refuses to reconcile the new CR while the old one still owns the running resources and reports the conflict on status, rather than letting the two fight.
+`kubectl delete` blocks until the object is gone by default, but this ordering matters for GitOps flows that might apply the new resource and prune the old one in a single commit, so it is worth stating explicitly.
+
 This incurs a single Console UI restart per instance.
 It is justified because the Console is an administrative and observability UI with high downtime tolerance, and because the CRD is alpha.
 It requires no additional operator code, is fully auditable and is GitOps-friendly.
@@ -141,6 +146,21 @@ Migration is user-driven and declarative.
   $ kubectl delete crd consoles.console.streamshub.github.com
   ```
 
+Removing the old-group controller creates a hazard for any user who has not yet migrated, and this must be guarded against.
+Once the old controller is gone, a leftover old-group Console still carries its finalizer, so deleting it (or the old CRD) hangs because nothing is left to run the cleanup.
+Worse, its cluster-scoped RBAC is left behind under exactly the `<namespace>-<name>-<resource>` names the new-group CR needs, so even creating the new CR then conflicts.
+With OLM automatic approval, a Subscription can carry a user into the Phase 3 release without them ever having migrated, landing them directly in this state.
+
+We address this with two complementary measures:
+
+- Prevention (recommended).
+  The last release that serves both groups reports `Upgradeable=False` on its OLM `OperatorCondition` whenever any old-group `Console` still exists.
+  OLM reads the *currently installed* operator's `OperatorCondition` before applying a replacement, so when a newer (Phase 3) CSV tries to install, OLM holds it in `Pending` until the condition clears, rather than automatically upgrading a cluster into the Phase 3 release before its Consoles have been migrated.
+  This is bridge-only functionality: the operator must manage its own `OperatorCondition` (fetching the CR named by the injected `OPERATOR_CONDITION_NAME`, and re-evaluating the old-group `Console` count on each reconcile to keep the condition and its `observedGeneration` current), and all of it is removed once the old group is gone.
+  It is recommended rather than mandatory because its failure modes are benign (a cluster admin can override it via the condition's `spec.overrides`, a wrongly-set `False` only stalls an upgrade, and a wrongly-set `True` simply falls through to the recovery below) and because it only affects OLM-managed installs; plain-manifest upgrades are a deliberate administrator action and are covered by the recovery step instead.
+- Break-glass recovery (mandatory).
+  The gate cannot help anyone already stuck such as a plain-manifest user who applied the Phase 3 version by hand or an OLM admin who overrode the condition, so we also document a manual recovery: remove the finalizer on the leftover old-group CR, delete its orphaned cluster RBAC (`ConsoleClusterRole`, `ConsoleClusterRoleBinding` and any monitoring bindings) by their `<namespace>-<name>-<resource>` names, then apply the new-group CR.
+
 ### Open questions
 
 These are the points the community should settle when reviewing this proposal:
@@ -150,11 +170,6 @@ These are the points the community should settle when reviewing this proposal:
   Whether zero-downtime is a hard requirement is worth confirming, since requiring it would mean revisiting the operator-assisted adoption approach in Rejected alternatives.
 - Deprecation window length.
   How many releases the old group remains served before removal (for example two to three minor releases).
-- Bundling with the anticipated `v1beta1` field cleanup.
-  Several fields in the current schema are already marked deprecated for removal in the next version of the API.
-  Bundling that cleanup with this rename would mean users go through one disruptive migration instead of two.
-  However, a cross-group rename and a within-group version bump are different mechanisms (the latter can use a conversion webhook), so bundling them raises complexity and risk.
-  This is worth an explicit decision either way.
 - OLM channel.
   Whether Phase 1 ships on the existing `alpha` channel or a new channel.
 - Duplicate-management guard.
@@ -162,12 +177,20 @@ These are the points the community should settle when reviewing this proposal:
 
 ## Affected/not affected projects
 
-Only the `streamshub/console` repository is affected.
+The `streamshub/console` repository carries the bulk of the change, but it is not the only StreamsHub project that references the old group, so the migration needs coordinating across a few repositories.
 
-- The CRD API group change touches the `operator` module, its RBAC and OLM bundle manifests, the CI workflows that reference the generated CRD file by name, the system tests (which currently hard-code the CRD file name) and the documentation and example manifests.
+Primary repository:
 
-No other project in the StreamsHub organization references this identifier, so no other project is affected.
-Third-party operator and CRD dependencies used by the Console operator (Strimzi and Fabric8) are unrelated and unaffected.
+- `streamshub/console` — the CRD API group change touches the `operator` module, its RBAC and OLM bundle manifests, the CI workflows that reference the generated CRD file by name, the system tests (which currently hard-code the CRD file name) and the documentation and example manifests.
+
+Other repositories that reference `console.streamshub.github.com` and need code or script changes synchronised with the migration phases:
+
+- `streamshub/developer-quickstart` — functional breakage, not just stale docs: `install.sh` and `uninstall.sh` reference the resource by group name (for example `kubectl wait … console.console.streamshub.github.com/…`), so both scripts break in Phase 3 if not updated. Also `components/core/stack/streamshub-console/console.yaml`, the metrics patch (`components/metrics/stack/kustomization.yaml` and `components/metrics/stack/console-metrics-patch.yaml`) and the kroxylicious overlay (`overlays/kroxylicious/stack/kustomization.yaml`).
+
+Documentation-only references, which should be updated but carry no runtime risk:
+
+- `streamshub/site` — the live Console and Developer Quick-Start documentation (`content/console/docs/main/…`, `content/docs/StreamsHub Console/main/…` and the quick-start docs) should be updated. The frozen versioned snapshots (for example `0.12.6` and `0.13.0`) can stay as they are, since they document released versions.
+- `streamshub/developer-quickstart` — `docs/troubleshooting.md` and `docs/uninstallation.md`.
 
 ## Compatibility
 
@@ -184,6 +207,10 @@ All in-repo references to the old group must be updated in lock-step during Phas
   The heavyweight process is not warranted here.
 - Conversion webhooks or `kube-storage-version-migrator`.
   Rejected as technically inapplicable: both operate strictly within a single API group.
+- Bundling the group rename with the anticipated `v1beta1` field cleanup.
+  Several fields in the current schema are already marked deprecated for removal in the next version of the API, and bundling that cleanup here would mean users go through one disruptive migration instead of two.
+  Rejected (consensus reached in review): a cross-group rename and a within-group version bump are different mechanisms (the latter can use a conversion webhook), so bundling them raises complexity and risk, and the field removals are not significant enough to justify a new CRD version at this time.
+  The field cleanup should be done separately, saved for a more substantial version bump.
 - Having the operator auto-create new-group CRs on users' behalf.
   Rejected: it creates objects outside the user's GitOps ownership, causing drift and adoption conflicts.
   Migration should be user-driven and declarative.
