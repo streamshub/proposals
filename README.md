@@ -17,4 +17,5 @@ File name format and numbering is validated by the CI workflow defined in [valid
 | 002 | [StreamsHub MCP: Strimzi MCP proposal](./002-streamshub-mcp-strimzi.md)           |
 | 003 | [Donation of streamshub-mcp to Strimzi](./003-donate-streamshub-mcp-to-strimzi.md) |
 | 004 | [StreamsHub Console: Migrate the Console CRD API Group to `console.streamshub.io`](./004-streamshub-io-namespace-migration.md) |
+| 005 | [StreamsHub Console: Local Developer Workflow Tooling (`devup`)](./005-developer-workflow-tooling.md) |
 
